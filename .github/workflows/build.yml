@@ -93,6 +93,13 @@ jobs:
           codesign --verify --deep --strict "$output/Standalone/Luma2A.app"
           mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
           ditto "$output/AU/Luma2A.component" "$HOME/Library/Audio/Plug-Ins/Components/Luma2A.component"
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          for attempt in {1..10}; do
+            if auval -a | awk '$1 == "aufx" && $2 == "OA2a" && $3 == "OpTo" { found = 1 } END { exit !found }'; then
+              break
+            fi
+            sleep 2
+          done
           auval -v aufx OA2a OpTo
 
       - name: Prepare artifact directory
