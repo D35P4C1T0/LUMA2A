@@ -114,7 +114,7 @@ jobs:
       - name: Package Windows
         if: runner.os == 'Windows'
         working-directory: build/Luma2A_artefacts/Release
-        run: cmake -E tar cf ../../../dist/Luma2A-Windows-x86_64.zip --format=zip VST3 Standalone
+        run: cmake -E tar cf ../../../dist/Luma2A-Windows-x86_64.zip --format=zip VST3/Luma2A.vst3 Standalone/Luma2A.exe
 
       - name: Upload builds
         uses: actions/upload-artifact@v7.0.2
