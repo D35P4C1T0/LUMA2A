@@ -39,6 +39,18 @@ macOS bundles are ad hoc signed. Builds remain in the project directory until in
 
 Windows builds support Visual Studio and CMake. An optional LLVM cross-build toolchain is provided in `tools/windows-clang-msvc.cmake`; `tools/build-windows.py --help` lists its SDK and compiler options.
 
+## Automated builds
+
+[GitHub Actions](https://github.com/D35P4C1T0/LUMA2A/actions/workflows/build.yml) builds and tests every push and pull request, and can also be started manually. Download the platform artifacts from a successful workflow run:
+
+| Platform | Architecture | Formats |
+| --- | --- | --- |
+| macOS | Apple Silicon + Intel (universal) | VST3, Audio Unit, standalone |
+| Linux | x86_64 | VST3, standalone |
+| Windows | x86_64 | VST3, standalone |
+
+Archives preserve plugin bundle structure and executable permissions. Artifacts are retained for 30 days. macOS builds are ad hoc signed.
+
 ## Install on macOS
 
 Copy `Luma2A.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `Luma2A.component` to `~/Library/Audio/Plug-Ins/Components/`. Replace previous installed versions, then restart your host and rescan plugins.

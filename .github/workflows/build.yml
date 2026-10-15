@@ -1,0 +1,134 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: macOS-universal
+          - os: ubuntu-22.04
+            platform: Linux-x86_64
+          - os: windows-2022
+            platform: Windows-x86_64
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk \
+            libfontconfig1-dev libfreetype6-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libglu1-mesa-dev mesa-common-dev xvfb xauth
+
+      - name: Configure macOS
+        if: runner.os == 'macOS'
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Configure Linux
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -A x64 -DBUILD_TESTING=ON
+
+      - name: Build
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a cmake --build build --config Release --parallel 2
+          else
+            cmake --build build --config Release --parallel 2
+          fi
+
+      - name: Test
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a ctest --test-dir build -C Release --output-on-failure
+          else
+            ctest --test-dir build -C Release --output-on-failure
+          fi
+
+      - name: Validate Audio Unit and universal binaries
+        if: runner.os == 'macOS'
+        run: |
+          output=build/Luma2A_artefacts/Release
+          for binary in \
+            "$output/VST3/Luma2A.vst3/Contents/MacOS/Luma2A" \
+            "$output/AU/Luma2A.component/Contents/MacOS/Luma2A" \
+            "$output/Standalone/Luma2A.app/Contents/MacOS/Luma2A"; do
+            lipo -verify_arch arm64 x86_64 "$binary"
+          done
+          codesign --verify --deep --strict "$output/VST3/Luma2A.vst3"
+          codesign --verify --deep --strict "$output/AU/Luma2A.component"
+          codesign --verify --deep --strict "$output/Standalone/Luma2A.app"
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          ditto "$output/AU/Luma2A.component" "$HOME/Library/Audio/Plug-Ins/Components/Luma2A.component"
+          auval -v aufx OA2a OpTo
+
+      - name: Prepare artifact directory
+        run: cmake -E make_directory dist
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        working-directory: build/Luma2A_artefacts/Release
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent VST3/Luma2A.vst3 ../../../dist/Luma2A-macOS-universal-vst3.zip
+          ditto -c -k --sequesterRsrc --keepParent AU/Luma2A.component ../../../dist/Luma2A-macOS-universal-au.zip
+          ditto -c -k --sequesterRsrc --keepParent Standalone/Luma2A.app ../../../dist/Luma2A-macOS-universal-standalone.zip
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        working-directory: build/Luma2A_artefacts/Release
+        run: tar -czf ../../../dist/Luma2A-Linux-x86_64.tar.gz VST3 Standalone
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        working-directory: build/Luma2A_artefacts/Release
+        run: cmake -E tar cf ../../../dist/Luma2A-Windows-x86_64.zip --format=zip VST3 Standalone
+
+      - name: Upload builds
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Luma2A-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: test-results-${{ matrix.platform }}
+          path: build/Testing/Temporary/
+          if-no-files-found: ignore
