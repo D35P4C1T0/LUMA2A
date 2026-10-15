@@ -86,7 +86,7 @@ jobs:
             "$output/VST3/Luma2A.vst3/Contents/MacOS/Luma2A" \
             "$output/AU/Luma2A.component/Contents/MacOS/Luma2A" \
             "$output/Standalone/Luma2A.app/Contents/MacOS/Luma2A"; do
-            lipo -verify_arch arm64 x86_64 "$binary"
+            lipo "$binary" -verify_arch arm64 x86_64
           done
           codesign --verify --deep --strict "$output/VST3/Luma2A.vst3"
           codesign --verify --deep --strict "$output/AU/Luma2A.component"
