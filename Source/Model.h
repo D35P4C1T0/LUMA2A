@@ -4,6 +4,7 @@
 #include "CircuitSetup.h"
 #include "ControlMapping.h"
 #include "Oversampling.h"
+#include "StereoFir.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -59,8 +60,9 @@ class Model {
     int oversampling = 4, upIndex = 0, downIndex = 0;
     bool hasProcessed = false;
     oversampling::Coefficients fir;
-    std::array<std::array<double, 33>, 2> upHistory{};
-    std::array<std::array<double, 129>, 2> downHistory{};
+    // Mirrored rings provide contiguous tap access without per-tap wrapping.
+    std::array<stereoFir::Frame, 66> upHistory{};
+    std::array<stereoFir::Frame, 258> downHistory{};
     double &d(unsigned byteOffset) { return memory[byteOffset / 8]; }
     static double table(const std::array<double, 2048> &t, double input) {
         const double x = std::clamp(input, 0.0, 1.0) * 2047.0;
@@ -187,11 +189,20 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
             d(0x9a8 + ch * 8) =
                 std::clamp(nonlin + y * d(0x938) * d(0x998) - nonlin * d(0x990), -1.0, 1.0);
             inputPeak = std::max(inputPeak, std::abs(y * d(0xb28) * d(0xcb8)));
-            upHistory[ch][upIndex] = y * d(0xb28) * 8.70142984443495;
+            upHistory[upIndex][ch] = y * d(0xb28) * 8.70142984443495;
+            upHistory[upIndex + 33][ch] = upHistory[upIndex][ch];
+        }
+        if (channels == 2) {
             for (int phase = 0; phase < oversampling; ++phase) {
-                for (int tap = 0; tap < 33; ++tap)
-                    up[ch][phase] += fir.up[phase][tap] * upHistory[ch][(upIndex + 33 - tap) % 33];
+                const auto value = stereoFir::convolve(fir.up[phase].data(),
+                                                       upHistory.data() + upIndex + 33, 33);
+                up[0][phase] = value[0];
+                up[1][phase] = value[1];
             }
+        } else {
+            for (int phase = 0; phase < oversampling; ++phase)
+                for (int tap = 0; tap < 33; ++tap)
+                    up[0][phase] += fir.up[phase][tap] * upHistory[upIndex + 33 - tap][0];
         }
         for (int phase = 0; phase < oversampling; ++phase) {
             double values[2]{up[0][phase], up[1][phase]};
@@ -200,12 +211,20 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
                 processed[ch][phase] = values[ch];
         }
         const int downLength = 32 * oversampling + 1;
-        for (int ch = 0; ch < channels; ++ch) {
-            double y = 0;
+        stereoFir::Frame down{};
+        if (channels == 2)
+            down = stereoFir::convolve(fir.down.data(),
+                                       downHistory.data() + downIndex + downLength, downLength);
+        else
             for (int tap = 0; tap < downLength; ++tap)
-                y += fir.down[tap] * downHistory[ch][(downIndex + downLength - tap) % downLength];
-            for (int phase = 0; phase < oversampling; ++phase)
-                downHistory[ch][(downIndex + phase) % downLength] = processed[ch][phase];
+                down[0] += fir.down[tap] * downHistory[downIndex + downLength - tap][0];
+        for (int ch = 0; ch < channels; ++ch) {
+            double y = down[ch];
+            for (int phase = 0; phase < oversampling; ++phase) {
+                const int slot = (downIndex + phase) % downLength;
+                downHistory[slot][ch] = processed[ch][phase];
+                downHistory[slot + downLength][ch] = processed[ch][phase];
+            }
             const double nonlin = d(0x9e8 + ch * 8);
             y /= 8.70142984443495;
             y = biquad((1 - nonlin * nonlin * nonlin * nonlin) * y, 0x968, 0xaa8 + ch * 16);

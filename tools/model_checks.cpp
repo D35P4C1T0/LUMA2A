@@ -32,6 +32,25 @@ static void render(Model &model, Audio &x, int block) {
     }
 }
 int main() try {
+    std::array<stereoFir::Frame, 258> history{};
+    std::array<double, 129> coefficients{};
+    for (size_t i = 0; i < history.size(); ++i)
+        history[i] = {{std::sin(static_cast<double>(i) * .17),
+                       std::cos(static_cast<double>(i) * .31)}};
+    for (size_t i = 0; i < coefficients.size(); ++i)
+        coefficients[i] = std::sin(static_cast<double>(i) * .23) / 129.0;
+    for (int taps : {33, 65, 129})
+        for (int newest = taps - 1; newest < taps * 2; ++newest) {
+            stereoFir::Frame expected{};
+            for (int tap = 0; tap < taps; ++tap)
+                for (size_t ch = 0; ch < 2; ++ch)
+                    expected[ch] += coefficients[static_cast<size_t>(tap)] *
+                                    history[static_cast<size_t>(newest - tap)][ch];
+            const auto actual = stereoFir::convolve(coefficients.data(), history.data() + newest,
+                                                     taps);
+            require(std::memcmp(expected.data(), actual.data(), sizeof(expected)) == 0,
+                    "Stereo FIR differs from scalar tap order");
+        }
     const auto input = signal(8192);
     for (double rate : {8000., 22050., 32000., 44100., 48000., 50000., 88200., 96000., 100000.,
                         176400., 192000., 384000.}) {
@@ -87,8 +106,8 @@ int main() try {
     for (int c = 0; c < 2; ++c)
         require(std::memcmp(out[c].data(), b[c].data(), out[c].size() * sizeof(float)) == 0,
                 "In-place processing differs from separate buffers");
-    std::cout << "12 sample rates: finite audio, block partition, reset, bypass latency and "
-                 "in-place checks passed\n";
+    std::cout << "Stereo FIR equivalence and 12 sample rates: finite audio, block partition, "
+                 "reset, bypass latency and in-place checks passed\n";
     return 0;
 } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';

@@ -9,7 +9,7 @@ artifacts=[
     ('Luma2A-macOS-universal-standalone.zip',ROOT/'build-macos-universal/Luma2A_artefacts/Release/Standalone/Luma2A.app'),
     ('Luma2A-Windows-x64-vst3.zip',ROOT/'build-win/Luma2A_artefacts/Release/VST3/Luma2A.vst3'),
 ]
-manifest={'version':'0.1.1','archives':[],'source_sha256':{}}
+manifest={'version':'0.1.2','archives':[],'source_sha256':{}}
 for name,source in artifacts:
     if not source.exists():raise SystemExit(f'Missing build: {source}')
     target=DIST/name

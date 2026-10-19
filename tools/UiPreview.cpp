@@ -131,9 +131,29 @@ int main(int argc, char **argv) {
         processor.selectBank(0);
         check(std::abs(processor.normalized(5) - .81f) < 1.e-6f, "Comparison bank recall");
         juce::MemoryBlock saved;
-        processor.getStateInformation(saved);
+        check(!processor.isDarkMode(), "Light theme by default");
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> view(processor.createEditor());
+            auto *toggle = dynamic_cast<juce::TextButton *>(view->findChildWithID("themeToggle"));
+            check(toggle != nullptr, "Theme toggle exists");
+            auto light = view->createComponentSnapshot(view->getLocalBounds());
+            toggle->onClick();
+            check(processor.isDarkMode(), "Theme toggle enables dark mode");
+            auto dark = view->createComponentSnapshot(view->getLocalBounds());
+            check(light.getPixelAt(0, 0) != dark.getPixelAt(0, 0), "Theme changes panel colour");
+            processor.getStateInformation(saved);
+            toggle->onClick();
+            check(!processor.isDarkMode(), "Theme toggle restores light mode");
+        }
         processor.loadFactoryPreset(20);
         processor.setStateInformation(saved.getData(), static_cast<int>(saved.getSize()));
+        check(processor.isDarkMode(), "Theme state round trip");
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> view(processor.createEditor());
+            auto *toggle = dynamic_cast<juce::TextButton *>(view->findChildWithID("themeToggle"));
+            check(toggle != nullptr && toggle->getButtonText() == "Light mode",
+                  "Reopened editor restores dark theme");
+        }
         check(std::abs(processor.normalized(5) - .81f) < 1.e-6f, "State round trip");
         processor.selectBank(1);
         check(std::abs(processor.normalized(5) - .19f) < 1.e-6f, "Inactive bank state round trip");
@@ -184,6 +204,8 @@ int main(int argc, char **argv) {
                      "checks passed\n";
         return 0;
     }
+    if (argc > 2 && juce::String(argv[2]) == "--dark")
+        processor.setDarkMode(true);
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
     editor->setSize(1120, 620);
     auto image = editor->createComponentSnapshot(editor->getLocalBounds(), true, 1.f);

@@ -2,8 +2,6 @@
 #include "FactoryPresets.h"
 namespace {
 constexpr int canvasWidth = 1120, canvasHeight = 620;
-const juce::Colour ink(0xff20201e), muted(0xff777770), accent(0xffde392b), panel(0xfff2f1eb);
-const juce::Colour paper(0xfffaf9f5), rule(0xffcecec5);
 juce::Font swiss(float height, bool bold = false) {
     return juce::Font(
         juce::FontOptions("Helvetica Neue", height, bold ? juce::Font::bold : juce::Font::plain));
@@ -13,7 +11,7 @@ juce::Point<float> polar(juce::Point<float> c, float radius, float angle) {
     return {c.x + radius * std::sin(angle), c.y - radius * std::cos(angle)};
 }
 void text(juce::Graphics &g, const juce::String &value, juce::Rectangle<float> bounds, float size,
-          juce::Colour colour = ink, juce::Justification align = juce::Justification::centred) {
+          juce::Colour colour, juce::Justification align = juce::Justification::centred) {
     g.setColour(colour);
     g.setFont(swiss(size));
     g.drawText(value, bounds, align);
@@ -21,6 +19,7 @@ void text(juce::Graphics &g, const juce::String &value, juce::Rectangle<float> b
 } // namespace
 void OptoEditor::FlatLook::drawButtonBackground(juce::Graphics &g, juce::Button &b,
                                                 const juce::Colour &, bool over, bool down) {
+    const auto accent = colours.accent;
     if (over || down) {
         g.setColour(accent.withAlpha(down ? .14f : .07f));
         g.fillRect(b.getLocalBounds());
@@ -36,6 +35,7 @@ juce::Font OptoEditor::FlatLook::getTextButtonFont(juce::TextButton &, int heigh
 juce::Font OptoEditor::FlatLook::getComboBoxFont(juce::ComboBox &) { return swiss(14); }
 void OptoEditor::FlatLook::drawComboBox(juce::Graphics &g, int w, int h, bool, int, int, int, int,
                                         juce::ComboBox &) {
+    const auto &[ink, muted, accent, panel, paper, rule, knob, knobRing] = colours;
     g.setColour(paper);
     g.fillRect(0, 0, w, h);
     g.setColour(ink);
@@ -48,13 +48,14 @@ void OptoEditor::FlatLook::drawComboBox(juce::Graphics &g, int w, int h, bool, i
 }
 class OptoEditor::Control final : public juce::Component, public juce::SettableTooltipClient {
   public:
-    Control(OptoProcessor &p, int i, juce::Rectangle<int> rectangle)
-        : engine(p), index(i), layout(rectangle) {
+    Control(OptoEditor &editor, OptoProcessor &p, int i, juce::Rectangle<int> rectangle)
+        : layout(rectangle), owner(editor), engine(p), index(i) {
         setTooltip(p.parameterSpecs()[static_cast<size_t>(i)].name);
         setWantsKeyboardFocus(true);
         setTitle(p.parameterSpecs()[static_cast<size_t>(i)].name);
     }
     void paint(juce::Graphics &g) override {
+        const auto &[ink, muted, accent, panel, paper, rule, knob, knobRing] = owner.look.colours;
         g.addTransform(juce::AffineTransform::scale(
             static_cast<float>(getWidth()) / static_cast<float>(layout.getWidth()),
             static_cast<float>(getHeight()) / static_cast<float>(layout.getHeight())));
@@ -110,9 +111,9 @@ class OptoEditor::Control final : public juce::Component, public juce::SettableT
                             -pi * .75f + pi * 1.5f * value, true);
         g.setColour(accent);
         g.strokePath(track, juce::PathStrokeType(2.f));
-        g.setColour(ink);
+        g.setColour(knob);
         g.fillEllipse(centre.x - radius, centre.y - radius, radius * 2, radius * 2);
-        g.setColour(paper.withAlpha(.2f));
+        g.setColour(knobRing);
         g.drawEllipse(centre.x - radius + 4, centre.y - radius + 4, (radius - 4) * 2,
                       (radius - 4) * 2, .6f);
         const float angle = -pi * .75f + value * pi * 1.5f;
@@ -156,9 +157,25 @@ class OptoEditor::Control final : public juce::Component, public juce::SettableT
             auto *dialog = new juce::AlertWindow(
                 "Set value", engine.parameterSpecs()[static_cast<size_t>(index)].name,
                 juce::MessageBoxIconType::NoIcon);
+            const auto &colours = owner.look.colours;
+            dialog->setColour(juce::AlertWindow::backgroundColourId, colours.paper);
+            dialog->setColour(juce::AlertWindow::textColourId, colours.ink);
+            dialog->setColour(juce::AlertWindow::outlineColourId, colours.rule);
             dialog->addTextEditor("value", juce::String(engine.normalized(index) * 100, 1));
+            auto *entry = dialog->getTextEditor("value");
+            entry->setColour(juce::TextEditor::backgroundColourId, colours.panel);
+            entry->setColour(juce::TextEditor::textColourId, colours.ink);
+            entry->setColour(juce::TextEditor::highlightColourId, colours.accent);
+            entry->setColour(juce::TextEditor::highlightedTextColourId, colours.paper);
+            entry->setColour(juce::TextEditor::focusedOutlineColourId, colours.accent);
+            entry->setColour(juce::CaretComponent::caretColourId, colours.ink);
             dialog->addButton("Apply", 1, juce::KeyPress(juce::KeyPress::returnKey));
             dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+            for (auto *child : dialog->getChildren())
+                if (auto *button = dynamic_cast<juce::TextButton *>(child)) {
+                    button->setColour(juce::TextButton::buttonColourId, colours.panel);
+                    button->setColour(juce::TextButton::textColourOffId, colours.ink);
+                }
             juce::Component::SafePointer<Control> safe(this);
             dialog->enterModalState(
                 true, juce::ModalCallbackFunction::create([safe, dialog](int result) {
@@ -209,14 +226,16 @@ class OptoEditor::Control final : public juce::Component, public juce::SettableT
     juce::RangedAudioParameter *parameter() {
         return engine.parameter(engine.parameterSpecs()[static_cast<size_t>(index)].id);
     }
+    OptoEditor &owner;
     OptoProcessor &engine;
     int index;
     float start = 0;
     juce::Point<float> origin;
 };
 OptoEditor::OptoEditor(OptoProcessor &p) : AudioProcessorEditor(p), engine(p) {
+    setLookAndFeel(&look);
     auto add = [&](int index, juce::Rectangle<int> rectangle) {
-        auto c = std::make_unique<Control>(engine, index, rectangle);
+        auto c = std::make_unique<Control>(*this, engine, index, rectangle);
         addAndMakeVisible(*c);
         controls.push_back(std::move(c));
     };
@@ -235,7 +254,6 @@ OptoEditor::OptoEditor(OptoProcessor &p) : AudioProcessorEditor(p), engine(p) {
     for (int i = 0; i < names.size(); ++i) {
         auto button = std::make_unique<juce::TextButton>(names[i]);
         button->setLookAndFeel(&look);
-        button->setColour(juce::TextButton::textColourOffId, muted);
         button->onClick = [this, i] {
             engine.undoManager.beginNewTransaction();
             if (i == 0)
@@ -271,15 +289,19 @@ OptoEditor::OptoEditor(OptoProcessor &p) : AudioProcessorEditor(p), engine(p) {
         if (preset.getSelectedId() > 0)
             engine.loadFactoryPreset(preset.getSelectedId() - 1);
     };
-    look.setColour(juce::PopupMenu::backgroundColourId, paper);
-    look.setColour(juce::PopupMenu::textColourId, ink);
-    look.setColour(juce::PopupMenu::highlightedBackgroundColourId, ink);
-    look.setColour(juce::PopupMenu::highlightedTextColourId, paper);
     preset.setLookAndFeel(&look);
-    preset.setColour(juce::ComboBox::backgroundColourId, paper);
-    preset.setColour(juce::ComboBox::textColourId, ink);
     preset.setColour(juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
     addAndMakeVisible(preset);
+    themeButton.setComponentID("themeToggle");
+    themeButton.setTitle("Colour theme");
+    themeButton.onClick = [this] {
+        engine.setDarkMode(!engine.isDarkMode());
+        engine.updateHostDisplay(
+            juce::AudioProcessorListener::ChangeDetails().withNonParameterStateChanged(true));
+        applyTheme();
+    };
+    addAndMakeVisible(themeButton);
+    applyTheme();
     setResizable(true, false);
     getConstrainer()->setFixedAspectRatio(static_cast<double>(canvasWidth) / canvasHeight);
     setResizeLimits(840, 465, 1680, 930);
@@ -292,8 +314,35 @@ OptoEditor::~OptoEditor() {
     preset.setLookAndFeel(nullptr);
     for (auto &b : buttons)
         b->setLookAndFeel(nullptr);
+    setLookAndFeel(nullptr);
+}
+void OptoEditor::applyTheme() {
+    darkMode = engine.isDarkMode();
+    look.colours = darkMode
+        ? Palette{juce::Colour(0xffeeeee8), juce::Colour(0xffa7a9a2), juce::Colour(0xffff6958),
+                  juce::Colour(0xff202220), juce::Colour(0xff292c29), juce::Colour(0xff484c46),
+                  juce::Colour(0xff141614), juce::Colour(0xff555b53)}
+        : Palette{};
+    const auto &[ink, muted, accent, panel, paper, rule, knob, knobRing] = look.colours;
+    look.setColour(juce::PopupMenu::backgroundColourId, paper);
+    look.setColour(juce::PopupMenu::textColourId, ink);
+    look.setColour(juce::PopupMenu::highlightedBackgroundColourId, ink);
+    look.setColour(juce::PopupMenu::highlightedTextColourId, paper);
+    look.setColour(juce::TooltipWindow::backgroundColourId, paper);
+    look.setColour(juce::TooltipWindow::textColourId, ink);
+    look.setColour(juce::TooltipWindow::outlineColourId, rule);
+    preset.setColour(juce::ComboBox::backgroundColourId, paper);
+    preset.setColour(juce::ComboBox::textColourId, ink);
+    for (auto &button : buttons)
+        button->setColour(juce::TextButton::textColourOffId, muted);
+    themeButton.setButtonText(darkMode ? "Light mode" : "Dark mode");
+    themeButton.setTooltip(darkMode ? "Switch to light mode" : "Switch to dark mode");
+    themeButton.setColour(juce::TextButton::textColourOffId, muted);
+    sendLookAndFeelChange();
+    repaint();
 }
 void OptoEditor::drawMeter(juce::Graphics &g) {
+    const auto &[ink, muted, accent, panel, paper, rule, knob, knobRing] = look.colours;
     const juce::Rectangle<float> shell(350, 105, 420, 237), face(362, 117, 396, 213);
     g.setColour(paper);
     g.fillRect(shell);
@@ -349,6 +398,7 @@ void OptoEditor::drawMeter(juce::Graphics &g) {
     g.restoreState();
 }
 void OptoEditor::paint(juce::Graphics &g) {
+    const auto &[ink, muted, accent, panel, paper, rule, knob, knobRing] = look.colours;
     g.fillAll(panel);
     g.addTransform(juce::AffineTransform::scale(static_cast<float>(getWidth()) / canvasWidth));
     g.setColour(ink);
@@ -377,6 +427,7 @@ void OptoEditor::resized() {
     for (auto &c : controls)
         c->setBounds((c->layout.toFloat() * scale).toNearestInt());
     preset.setBounds((juce::Rectangle<float>(326, 26, 262, 32) * scale).toNearestInt());
+    themeButton.setBounds((juce::Rectangle<float>(976, 58, 112, 26) * scale).toNearestInt());
     const std::array<juce::Rectangle<float>, 10> bounds{{{605, 27, 42, 30},
                                                          {650, 27, 42, 30},
                                                          {708, 27, 25, 30},
@@ -391,6 +442,9 @@ void OptoEditor::resized() {
         buttons[i]->setBounds((bounds[i] * scale).toNearestInt());
 }
 void OptoEditor::timerCallback() {
+    if (darkMode != engine.isDarkMode())
+        applyTheme();
+    const auto &[ink, muted, accent, panel, paper, rule, knob, knobRing] = look.colours;
     needle = engine.needlePosition.load();
     preset.setSelectedId(engine.currentFactoryPreset() + 1, juce::dontSendNotification);
     for (int i = 0; i < 4; ++i)

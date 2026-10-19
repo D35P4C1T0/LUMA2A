@@ -172,21 +172,11 @@ template <typename T> void OptoProcessor::process(juce::AudioBuffer<T> &buffer) 
         return;
     for (int i = 0; i < 10; ++i)
         model.setParameter(i, i == 0 && getBypassParameter()->getValue() > .5f ? 0 : normalized(i));
-    auto inLevel = 0.0;
-    for (int c = 0; c < buffer.getNumChannels(); ++c)
-        inLevel = std::max(inLevel,
-                           static_cast<double>(buffer.getRMSLevel(c, 0, buffer.getNumSamples())));
     std::array<T *, 2> channels{};
     for (int c = 0; c < buffer.getNumChannels(); ++c)
         channels[static_cast<size_t>(c)] = buffer.getWritePointer(c);
     auto **ptr = channels.data();
     model.process(ptr, ptr, buffer.getNumChannels(), buffer.getNumSamples());
-    auto outLevel = 0.0;
-    for (int c = 0; c < buffer.getNumChannels(); ++c)
-        outLevel = std::max(outLevel,
-                            static_cast<double>(buffer.getRMSLevel(c, 0, buffer.getNumSamples())));
-    inputDb.store(static_cast<float>(juce::Decibels::gainToDecibels(inLevel, -80.0)));
-    outputDb.store(static_cast<float>(juce::Decibels::gainToDecibels(outLevel, -80.0)));
     reductionDb.store(static_cast<float>(model.meterGainReduction()));
     needlePosition.store(static_cast<float>(model.meterVuNormalized()));
     parameter("GRMeter")->setValue(static_cast<float>(model.meterGainReductionNormalized()));
@@ -199,6 +189,7 @@ void OptoProcessor::getStateInformation(juce::MemoryBlock &dest) {
     for (int i = 0; i < 10; ++i)
         banks[static_cast<size_t>(activeBank)][static_cast<size_t>(i)] = normalized(i);
     auto tree = state.copyState();
+    tree.setProperty("darkMode", isDarkMode(), nullptr);
     tree.setProperty("activeBank", activeBank, nullptr);
     tree.setProperty("activePreset", activePreset, nullptr);
     for (int b = 0; b < 4; ++b)
@@ -214,6 +205,7 @@ void OptoProcessor::setStateInformation(const void *data, int size) {
     auto xml = getXmlFromBinary(data, size);
     if (xml && xml->hasTagName(state.state.getType())) {
         auto tree = juce::ValueTree::fromXml(*xml);
+        setDarkMode(static_cast<bool>(tree.getProperty("darkMode", false)));
         activeBank = juce::jlimit(0, 3, static_cast<int>(tree.getProperty("activeBank", 0)));
         activePreset = juce::jlimit(0, 84, static_cast<int>(tree.getProperty("activePreset", 0)));
         for (int b = 0; b < 4; ++b)

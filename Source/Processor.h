@@ -48,7 +48,9 @@ class OptoProcessor final : public juce::AudioProcessor,
     void changeProgramName(int, const juce::String &) override {}
     void getStateInformation(juce::MemoryBlock &) override;
     void setStateInformation(const void *, int) override;
-    std::atomic<float> inputDb{-60}, outputDb{-60}, reductionDb{0}, needlePosition{.67f};
+    bool isDarkMode() const noexcept { return darkMode.load(); }
+    void setDarkMode(bool enabled) noexcept { darkMode.store(enabled); }
+    std::atomic<float> reductionDb{0}, needlePosition{.67f};
 
   private:
     static juce::AudioProcessorValueTreeState::ParameterLayout makeLayout();
@@ -57,5 +59,6 @@ class OptoProcessor final : public juce::AudioProcessor,
     std::array<std::array<float, 10>, 4> banks{};
     int activeBank = 0;
     int activePreset = 0;
+    std::atomic<bool> darkMode{false};
     Model model;
 };

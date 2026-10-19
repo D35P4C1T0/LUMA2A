@@ -10,6 +10,7 @@ Gain and Peak Reduction set makeup gain and compression. Recovery, Aging and HF 
 
 - 85 factory presets and four comparison banks (A–D)
 - Undo/redo, copy/paste and reset
+- Light and [dark themes](docs/editor-dark.png), saved with the plugin session
 - Mono and stereo processing, with float and double precision support
 - 32-sample latency, including power-off and bypass modes
 
@@ -51,6 +52,8 @@ Windows builds support Visual Studio and CMake. An optional LLVM cross-build too
 
 Archives preserve plugin bundle structure and executable permissions. Artifacts are retained for 30 days. macOS builds are ad hoc signed.
 
+Version tags also publish the validated platform archives to GitHub Releases.
+
 ## Install on macOS
 
 Copy `Luma2A.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `Luma2A.component` to `~/Library/Audio/Plug-Ins/Components/`. Replace previous installed versions, then restart your host and rescan plugins.
@@ -60,9 +63,6 @@ Copy `Luma2A.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `Luma2A.component` to
 `ModelChecks` checks block independence, reset, in-place processing, finite output and bypass latency across twelve sample rates. `PluginStateChecks` checks parameter identities, defaults, presets, comparison banks, session state, mono/stereo layouts and float/double processing.
 
 `UiPreview` renders the editor to a PNG and provides VST3 inspection and session-compatibility checks. `model_render` processes raw interleaved float32 audio offline.
-
-The audio tables use a reproducible statistical variation capped at 0.5% per
-entry. See the [model and reference-audio measurements](docs/audio-table-model.md).
 
 ## Source layout
 
