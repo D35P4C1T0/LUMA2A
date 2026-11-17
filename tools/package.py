@@ -19,7 +19,7 @@ for name,source in artifacts:
 files=[ROOT/'CMakeLists.txt',ROOT/'README.md',ROOT/'.gitignore']
 for directory in ('Source','docs'):
     files.extend(p for p in (ROOT/directory).rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix.lower() not in ('.exe','.obj','.d','.o','.pyc','.manifest'))
-files.extend(ROOT/'tools'/name for name in ('UiPreview.cpp','model_checks.cpp','model_render.cpp','package.py','build-windows.py','windows-clang-msvc.cmake'))
+files.extend(ROOT/'tools'/name for name in ('UiPreview.cpp','model_checks.cpp','model_render.cpp','model_bench.cpp','transfer_checks.cpp','package.py','build-windows.py','windows-clang-msvc.cmake'))
 files.append(ROOT/'.clang-format')
 with zipfile.ZipFile(DIST/'Luma2A-source.zip','w',zipfile.ZIP_DEFLATED) as archive:
     for path in sorted(set(files)):

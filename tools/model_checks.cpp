@@ -70,12 +70,16 @@ int main() try {
             for (float value : a[c])
                 require(std::isfinite(value), "Non-finite audio");
         }
+        require(whole.meterGainReduction() == chunked.meterGainReduction(),
+                "Gain reduction meter depends on block partition");
         whole.reset();
         auto recalled = input;
         render(whole, recalled, 511);
         for (int c = 0; c < 2; ++c)
             require(std::memcmp(a[c].data(), recalled[c].data(), a[c].size() * sizeof(float)) == 0,
                     "Reset does not reproduce prepared state");
+        const size_t latency = rate >= 100000 ? 0U : 32U;
+        require(whole.latencySamples() == static_cast<int>(latency), "Model latency policy");
         Model dry;
         dry.prepare(rate, 2);
         dry.setParameter(8, 0);
@@ -83,8 +87,8 @@ int main() try {
         render(dry, bypassed, 256);
         for (int c = 0; c < 2; ++c)
             for (size_t i = 0; i < bypassed[c].size(); ++i)
-                require(bypassed[c][i] == (i < 32 ? 0.f : input[c][i - 32]),
-                        "Dry mix is not delayed by 32 samples");
+                require(bypassed[c][i] == (i < latency ? 0.f : input[c][i - latency]),
+                        "Dry mix does not match reported latency");
         Model off;
         off.prepare(rate, 2);
         off.setParameter(0, 0);
@@ -92,9 +96,26 @@ int main() try {
         render(off, poweredOff, 256);
         for (int c = 0; c < 2; ++c)
             for (size_t i = 0; i < poweredOff[c].size(); ++i)
-                require(poweredOff[c][i] == (i < 32 ? 0.f : input[c][i - 32]),
-                        "Power bypass is not delayed by 32 samples");
+                require(poweredOff[c][i] == (i < latency ? 0.f : input[c][i - latency]),
+                        "Power bypass does not match reported latency");
     }
+    // Native-rate wet processing must respond immediately, not only its dry mix.
+    for (double rate : {100000., 176400., 192000., 384000.})
+        for (int channels : {1, 2}) {
+            Model wet, silence;
+            wet.prepare(rate, channels);
+            silence.prepare(rate, channels);
+            double impulse[2][128]{}, zero[2][128]{};
+            double *p[2] = {impulse[0], impulse[1]}, *q[2] = {zero[0], zero[1]};
+            for (int ch = 0; ch < channels; ++ch)
+                impulse[ch][0] = .25;
+            wet.process(p, p, channels, 128);
+            silence.process(q, q, channels, 128);
+            for (int ch = 0; ch < channels; ++ch) {
+                const double first = std::abs(impulse[ch][0] - zero[ch][0]);
+                require(first > .01, "Native-rate wet path buffers the first sample");
+            }
+        }
     Model separate, inplace;
     separate.prepare(48000, 2);
     inplace.prepare(48000, 2);

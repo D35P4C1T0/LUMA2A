@@ -12,7 +12,7 @@ Gain and Peak Reduction set makeup gain and compression. Recovery, Aging and HF 
 - Undo/redo, copy/paste and reset
 - Light and [dark themes](docs/editor-dark.png), saved with the plugin session
 - Mono and stereo processing, with float and double precision support
-- 32-sample latency, including power-off and bypass modes
+- Zero added buffering latency at 100 kHz and above (including 176.4/192 kHz); 32 samples below 100 kHz, including power-off and bypass modes
 
 Drag a knob, scroll, or use the arrow keys to adjust it. Hold Shift for fine adjustment. Double-click a knob to reset it, or its label/value to enter an exact value.
 
@@ -60,7 +60,11 @@ Copy `Luma2A.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `Luma2A.component` to
 
 ## Tests
 
+`TransferChecks` checks transfer-curve calibration points within 3%, finite output across the input domain, clamping and continuity at the central branches.
+
 `ModelChecks` checks block independence, reset, in-place processing, finite output and bypass latency across twelve sample rates. `PluginStateChecks` checks parameter identities, defaults, presets, comparison banks, session state, mono/stereo layouts and float/double processing.
+
+`model_bench` measures in-process Release CPU time at 48/96/192 kHz, with mono/stereo and 64/256-sample blocks.
 
 `UiPreview` renders the editor to a PNG and provides VST3 inspection and session-compatibility checks. `model_render` processes raw interleaved float32 audio offline.
 

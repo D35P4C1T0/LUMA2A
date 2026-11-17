@@ -176,29 +176,33 @@ int main(int argc, char **argv) {
                                                        : juce::AudioChannelSet::stereo());
             layout.outputBuses.set(0, layout.inputBuses[0]);
             check(processor.setBusesLayout(layout), "Mono/stereo layout");
-            processor.loadFactoryPreset(0);
-            processor.prepareToPlay(48000, 512);
-            processor.getBypassParameter()->setValueNotifyingHost(1);
-            juce::MidiBuffer midi;
-            juce::AudioBuffer<float> f(channelCount, 1024);
-            f.clear();
-            for (int ch = 0; ch < channelCount; ++ch)
-                f.setSample(ch, 0, 1);
-            processor.processBlock(f, midi);
-            check(std::abs(f.getSample(0, 0)) < 1.e-9f, "Bypass keeps delay");
-            for (int ch = 0; ch < channelCount; ++ch)
-                for (int i = 0; i < f.getNumSamples(); ++i)
-                    check(std::isfinite(f.getSample(ch, i)), "Finite float processing");
-            processor.getBypassParameter()->setValueNotifyingHost(0);
-            processor.prepareToPlay(48000, 512);
-            juce::AudioBuffer<double> d(channelCount, 1024);
-            d.clear();
-            for (int ch = 0; ch < channelCount; ++ch)
-                d.setSample(ch, 0, .5);
-            processor.processBlock(d, midi);
-            for (int ch = 0; ch < channelCount; ++ch)
-                for (int i = 0; i < d.getNumSamples(); ++i)
-                    check(std::isfinite(d.getSample(ch, i)), "Finite double processing");
+            for (double rate : {48000., 96000., 192000., 48000.}) {
+                processor.loadFactoryPreset(0);
+                processor.prepareToPlay(rate, 512);
+                processor.getBypassParameter()->setValueNotifyingHost(1);
+                juce::MidiBuffer midi;
+                juce::AudioBuffer<float> f(channelCount, 1024);
+                f.clear();
+                for (int ch = 0; ch < channelCount; ++ch)
+                    f.setSample(ch, 0, 1);
+                processor.processBlock(f, midi);
+                const int latency = rate >= 100000 ? 0 : 32;
+                check(processor.getLatencySamples() == latency, "Rate-dependent host latency");
+                check(f.getSample(0, latency) == 1.f, "Bypass matches host latency");
+                for (int ch = 0; ch < channelCount; ++ch)
+                    for (int i = 0; i < f.getNumSamples(); ++i)
+                        check(std::isfinite(f.getSample(ch, i)), "Finite float processing");
+                processor.getBypassParameter()->setValueNotifyingHost(0);
+                processor.prepareToPlay(rate, 512);
+                juce::AudioBuffer<double> d(channelCount, 1024);
+                d.clear();
+                for (int ch = 0; ch < channelCount; ++ch)
+                    d.setSample(ch, 0, .5);
+                processor.processBlock(d, midi);
+                for (int ch = 0; ch < channelCount; ++ch)
+                    for (int i = 0; i < d.getNumSamples(); ++i)
+                        check(std::isfinite(d.getSample(ch, i)), "Finite double processing");
+            }
         }
         std::cout << "Plugin IDs, presets, state, banks, mono/stereo, float/double and bypass "
                      "checks passed\n";

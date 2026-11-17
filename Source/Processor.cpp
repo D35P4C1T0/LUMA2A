@@ -158,7 +158,7 @@ void OptoProcessor::setNormalized(int i, float v) {
 }
 void OptoProcessor::prepareToPlay(double sr, int) {
     model.prepare(sr, getTotalNumInputChannels());
-    setLatencySamples(32);
+    setLatencySamples(model.latencySamples());
 }
 void OptoProcessor::releaseResources() { model.reset(); }
 bool OptoProcessor::isBusesLayoutSupported(const BusesLayout &b) const {

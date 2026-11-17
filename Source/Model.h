@@ -1,5 +1,5 @@
 #pragma once
-#include "AudioTables.h"
+#include "AudioCurves.h"
 #include "CircuitInitial.h"
 #include "CircuitSetup.h"
 #include "ControlMapping.h"
@@ -27,6 +27,7 @@ class Model {
     void process(double **in, double **out, int channels, int frames) {
         processTyped(in, out, channels, frames);
     }
+    int latencySamples() const noexcept { return oversampling == 1 ? 0 : 32; }
     double meterGainReduction() const noexcept { return reduction; }
     double meterGainReductionNormalized() const noexcept { return 1.0 - lastGain; }
     double meterVuNormalized() const noexcept {
@@ -64,15 +65,6 @@ class Model {
     std::array<stereoFir::Frame, 66> upHistory{};
     std::array<stereoFir::Frame, 258> downHistory{};
     double &d(unsigned byteOffset) { return memory[byteOffset / 8]; }
-    static double table(const std::array<double, 2048> &t, double input) {
-        const double x = std::clamp(input, 0.0, 1.0) * 2047.0;
-        const int i = static_cast<int>(x);
-        const double f = x - i;
-        const double prev = t[static_cast<unsigned>(std::max(0, i - 1))];
-        const double cur = t[static_cast<unsigned>(i)];
-        const double next = t[static_cast<unsigned>(std::min(2047, i + 1))];
-        return (((next + prev) * f + (next - prev)) * .5 - cur * f) * f + cur;
-    }
     double biquad(double x, unsigned coeff, unsigned state) {
         const double y = x * d(coeff) + d(state);
         d(state) = x * d(coeff + 8) - y * d(coeff + 16) + d(state + 8);
@@ -92,12 +84,12 @@ class Model {
         for (int ch = 0; ch < channels; ++ch)
             sum += audio[ch] / channels;
         double v =
-            table(audioTables::stage1, (d(0xd08) * sum * d(0xc10) - d(0xb60)) * .0833333333 + .5);
+            audioCurves::stage1((d(0xd08) * sum * d(0xc10) - d(0xb60)) * .0833333333 + .5);
         d(0xb60) += (((275 - v) / d(0xb38) - v / d(0xb40)) * d(0xb48) - d(0xb60)) * d(0xb58);
         double u = (v - d(0xb68) - (d(0xba8) * d(0xd60) + d(0xbb8))) / (1 + d(0xd60) * d(0xd38));
         const double f1 = biquad(u, 0xd38, 0xba8);
         (void)biquad(f1, 0xd60, 0xbb8);
-        v = table(audioTables::stage2, (u * d(0xba0) - d(0xb90)) * .025 + .5);
+        v = audioCurves::stage2((u * d(0xba0) - d(0xb90)) * .025 + .5);
         d(0xb90) += (((275 - v) / d(0xb70)) * d(0xb78) - d(0xb90)) * d(0xb88);
         const double sc = biquad(v - d(0xb98), 0xd10, 0xbc8);
         const double target =
@@ -112,13 +104,12 @@ class Model {
         feedback /= feedback + 68000;
         d(0xc10) = feedback;
         const double gain = a / b * feedback;
-        reduction = std::max(0.0, -20 * std::log10(std::max(1e-12, gain * d(0xc18))));
         for (int ch = 0; ch < channels; ++ch) {
             double s = biquad(gain * d(0xd00) * audio[ch], 0xd88, 0xc90 + ch * 16);
-            s = table(audioTables::stage3, s * .0625 + .5);
+            s = audioCurves::stage3(s * .0625 + .5);
             const double y = s * d(0xc20) + d(0xc48 + ch * 8);
             d(0xc48 + ch * 8) = s * d(0xc28) - y * d(0xc30);
-            s = table(audioTables::stage4, y * .05 + .5);
+            s = audioCurves::stage4(y * .05 + .5);
             audio[ch] = s * d(0xc58) + d(0xc80 + ch * 8);
             d(0xc80 + ch * 8) = s * d(0xc60) - audio[ch] * d(0xc68);
         }
@@ -140,7 +131,8 @@ inline void Model::reset() {
         memory[0x938 / 8 + i] = initial[i];
     oversampling = sampleRate < 50000 ? 4 : sampleRate < 100000 ? 2 : 1;
     circuitSetup::configure(memory, sampleRate, oversampling, parameters);
-    fir.prepare(oversampling);
+    if (oversampling > 1)
+        fir.prepare(oversampling);
     upIndex = downIndex = 0;
     for (auto &c : upHistory)
         c.fill(0);
@@ -170,7 +162,7 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
         if (sleeping) {
             for (int ch = 0; ch < channels; ++ch) {
                 const T x = inputs[ch][frame];
-                outputs[ch][frame] = static_cast<T>(dryDelay[ch][delayIndex]);
+                outputs[ch][frame] = oversampling == 1 ? x : static_cast<T>(dryDelay[ch][delayIndex]);
                 dryDelay[ch][delayIndex] = x;
             }
             updateVu(0);
@@ -181,7 +173,7 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
         double inputPeak = 0, outputPeak = 0;
         for (int ch = 0; ch < channels; ++ch) {
             const double x = inputs[ch][frame];
-            dry[ch] = dryDelay[ch][delayIndex];
+            dry[ch] = oversampling == 1 ? x : dryDelay[ch][delayIndex];
             dryDelay[ch][delayIndex] = x;
             const double nonlin = d(0x9a8 + ch * 8);
             const double y =
@@ -189,20 +181,26 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
             d(0x9a8 + ch * 8) =
                 std::clamp(nonlin + y * d(0x938) * d(0x998) - nonlin * d(0x990), -1.0, 1.0);
             inputPeak = std::max(inputPeak, std::abs(y * d(0xb28) * d(0xcb8)));
-            upHistory[upIndex][ch] = y * d(0xb28) * 8.70142984443495;
-            upHistory[upIndex + 33][ch] = upHistory[upIndex][ch];
-        }
-        if (channels == 2) {
-            for (int phase = 0; phase < oversampling; ++phase) {
-                const auto value = stereoFir::convolve(fir.up[phase].data(),
-                                                       upHistory.data() + upIndex + 33, 33);
-                up[0][phase] = value[0];
-                up[1][phase] = value[1];
+            if (oversampling == 1)
+                up[ch][0] = y * d(0xb28) * 8.70142984443495;
+            else {
+                upHistory[upIndex][ch] = y * d(0xb28) * 8.70142984443495;
+                upHistory[upIndex + 33][ch] = upHistory[upIndex][ch];
             }
-        } else {
-            for (int phase = 0; phase < oversampling; ++phase)
-                for (int tap = 0; tap < 33; ++tap)
-                    up[0][phase] += fir.up[phase][tap] * upHistory[upIndex + 33 - tap][0];
+        }
+        if (oversampling > 1) {
+            if (channels == 2) {
+                for (int phase = 0; phase < oversampling; ++phase) {
+                    const auto value = stereoFir::convolve(fir.up[phase].data(),
+                                                           upHistory.data() + upIndex + 33, 33);
+                    up[0][phase] = value[0];
+                    up[1][phase] = value[1];
+                }
+            } else {
+                for (int phase = 0; phase < oversampling; ++phase)
+                    for (int tap = 0; tap < 33; ++tap)
+                        up[0][phase] += fir.up[phase][tap] * upHistory[upIndex + 33 - tap][0];
+            }
         }
         for (int phase = 0; phase < oversampling; ++phase) {
             double values[2]{up[0][phase], up[1][phase]};
@@ -212,7 +210,10 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
         }
         const int downLength = 32 * oversampling + 1;
         stereoFir::Frame down{};
-        if (channels == 2)
+        if (oversampling == 1) {
+            down[0] = processed[0][0];
+            down[1] = processed[1][0];
+        } else if (channels == 2)
             down = stereoFir::convolve(fir.down.data(),
                                        downHistory.data() + downIndex + downLength, downLength);
         else
@@ -220,7 +221,7 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
                 down[0] += fir.down[tap] * downHistory[downIndex + downLength - tap][0];
         for (int ch = 0; ch < channels; ++ch) {
             double y = down[ch];
-            for (int phase = 0; phase < oversampling; ++phase) {
+            for (int phase = 0; oversampling > 1 && phase < oversampling; ++phase) {
                 const int slot = (downIndex + phase) % downLength;
                 downHistory[slot][ch] = processed[ch][phase];
                 downHistory[slot + downLength][ch] = processed[ch][phase];
@@ -241,7 +242,12 @@ template <class T> void Model::processTyped(T **inputs, T **outputs, int channel
                                             : outputPeak;
         updateVu(d(0xcf8) * selected);
         delayIndex = (delayIndex + 1) % 32;
-        upIndex = (upIndex + 1) % 33;
-        downIndex = (downIndex + oversampling) % downLength;
+        if (oversampling > 1) {
+            upIndex = (upIndex + 1) % 33;
+            downIndex = (downIndex + oversampling) % downLength;
+        }
     }
+    // The host reads gain reduction once per block, not per oversampled step.
+    if (frames > 0 && !sleeping)
+        reduction = std::max(0.0, -20 * std::log10(std::max(1e-12, lastGain)));
 }
